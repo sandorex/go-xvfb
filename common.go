@@ -21,20 +21,6 @@ import (
 	"os/exec"
 )
 
-// Options represents options that displays use
-//
-// NOTE not all options are used in all display backends
-type Options struct {
-	Display    int
-	Width      int
-	Height     int
-	ColorDepth int
-	Args       []string
-
-	// SetEnv should the DISPLAY variable be set automatically
-	SetEnv bool
-}
-
 // ErrCrashed means the display has quit unexpectedly
 var ErrCrashed = errors.New("display has quit unexpectedly")
 
@@ -44,7 +30,8 @@ var ErrAlreadyRunning = errors.New("display is already running")
 // ErrNotRunning means the display is not running
 var ErrNotRunning = errors.New("display is not running")
 
-// var ErrNoDisplay = errors.New("xephyr requires a running x server") // TODO
+// ErrNoDisplay means the host display is not running
+var ErrNoDisplay = errors.New("xephyr requires a running x server")
 
 // ErrTimeout means timeout has been exceeded
 type ErrTimeout int
@@ -58,6 +45,12 @@ type ErrDisplayInUse int
 
 func (e ErrDisplayInUse) Error() string {
 	return fmt.Sprintf("display %d is in use, please remove the lockfile at /tmp/.X11-unix/X%d", int(e), int(e))
+}
+
+// isDisplayInUse checks if display is in use
+func isDisplayInUse(display int) bool {
+	_, err := os.Stat(fmt.Sprintf("/tmp/.X11-unix/X%d", display))
+	return !os.IsNotExist(err)
 }
 
 // isDisplayReady checks if display is ready

@@ -18,32 +18,30 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 )
 
 // Xvfb is a display backend that opens a virtual x server in the background
 type Xvfb struct {
-	*Options
-	cmd *exec.Cmd
+	baseDisplay
 }
 
-// check if it implements display
+// check if it implements Display
 var _ Display = (*Xvfb)(nil)
 
-// NewXvfb Xvfb constructor
-func NewXvfb(options Options) *Xvfb {
-	// set default values
-	if options.ColorDepth == 0 {
-		options.ColorDepth = 24
+// NewXvfb constructor for Xvfb
+func NewXvfb(display, width, height int) *Xvfb {
+	xvfb := Xvfb{}
+	xvfb.Display = display
+	xvfb.Width = width
+	xvfb.Height = height
+
+	if xvfb.Width == 0 || xvfb.Height == 0 {
+		xvfb.Width = 1280
+		xvfb.Height = 720
 	}
 
-	if options.Width == 0 || options.Height == 0 {
-		options.Width = 1280
-		options.Height = 720
-	}
-
-	return &Xvfb{Options: &options, cmd: nil}
+	return &xvfb
 }
 
 // Start starts Xvfb
@@ -54,25 +52,19 @@ func (x *Xvfb) Start() error {
 
 	display := fmt.Sprintf(":%d", x.Display)
 
-	_, err := os.Stat(fmt.Sprintf("/tmp/.X11-unix/X%d", x.Display))
-	if !os.IsNotExist(err) {
+	if isDisplayInUse(x.Display) {
 		return ErrDisplayInUse(x.Display)
 	}
 
-	// TODO capture process output and return it with an error
 	x.cmd = exec.Command(
 		"Xvfb",
 		append([]string{
-			display,
+			fmt.Sprintf(":%d", x.Display),
 			"-screen",
 			"0",
-			fmt.Sprintf("%dx%dx%d", x.Width, x.Height, x.ColorDepth),
+			fmt.Sprintf("%dx%dx24", x.Width, x.Height),
 		}, x.Args...)...,
 	)
-
-	if err := os.Setenv("DISPLAY", display); err != nil {
-		return err
-	}
 
 	// start and return if any error rises
 	if err := x.cmd.Start(); err != nil {
@@ -87,82 +79,21 @@ func (x *Xvfb) Start() error {
 		return ErrCrashed
 	}
 
+	if err := os.Setenv("DISPLAY", display); err != nil {
+		return err
+	}
+
 	return nil
-}
-
-// Stop stops Xvfb gracefully
-func (x Xvfb) Stop() error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	return x.cmd.Process.Signal(syscall.SIGTERM)
-}
-
-// Kill stops Xvfb forcefully
-func (x Xvfb) Kill() error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	return x.cmd.Process.Kill()
-}
-
-// Wait waits for Xvfb to quit
-func (x Xvfb) Wait() error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	return x.cmd.Wait()
-}
-
-// IsRunning checks if Xvfb process is running
-func (x Xvfb) IsRunning() bool {
-	if x.cmd == nil || x.cmd.Process == nil {
-		return false
-	}
-
-	return x.cmd.Process.Signal(syscall.Signal(0)) == nil
-}
-
-// IsReady checks if Xvfb is ready to display windows
-func (x Xvfb) IsReady() (bool, error) {
-	return isDisplayReady(x.Display)
-}
-
-// WaitUntilReady waits until the Xvfb is ready or timeout has been exceeded
-func (x Xvfb) WaitUntilReady(timeout int) error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	i := 0
-	for timeout == 0 || i < timeout {
-		ready, err := x.IsReady()
-
-		// NOTE ExitError is caught by IsReady(), so this is for other errors
-		if err != nil {
-			return err
-		}
-
-		if ready {
-			return nil
-		}
-
-		time.Sleep(1 * time.Second)
-
-		if timeout != 0 {
-			i++
-		}
-	}
-
-	return ErrTimeout(timeout)
 }
 
 // IsVisible is the backend visible
 func (Xvfb) IsVisible() bool {
 	return false
+}
+
+// GetBackend returns name of the backend
+func (Xvfb) GetBackend() string {
+	return "xvfb"
 }
 
 // GetDependencies returns dependencies that should be in path for it to run

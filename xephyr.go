@@ -18,29 +18,33 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 )
 
 // Xephyr is a display backend that opens a virtual x server as a window in
 // existing x server, as such it requires a running x server
 type Xephyr struct {
-	*Options
-	cmd *exec.Cmd
+	baseDisplay
+	HostDisplay int
 }
 
-// check if it implements display
+// check if it implements Display
 var _ Display = (*Xephyr)(nil)
 
-// NewXephyr Xephyr constructor
-func NewXephyr(options Options) *Xephyr {
-	// set default values
-	if options.Width == 0 || options.Height == 0 {
-		options.Width = 1280
-		options.Height = 720
+// NewXephyr constructor for Xephyr
+func NewXephyr(display, width, height, hostDisplay int) *Xephyr {
+	xephyr := Xephyr{}
+	xephyr.Display = display
+	xephyr.Width = width
+	xephyr.Height = height
+	xephyr.HostDisplay = hostDisplay
+
+	if xephyr.Width == 0 || xephyr.Height == 0 {
+		xephyr.Width = 1280
+		xephyr.Height = 720
 	}
 
-	return &Xephyr{Options: &options, cmd: nil}
+	return &xephyr
 }
 
 // Start starts Xephyr
@@ -49,30 +53,26 @@ func (x *Xephyr) Start() error {
 		return ErrAlreadyRunning
 	}
 
-	// TODO check if xserver is running
+	if !isDisplayInUse(x.HostDisplay) {
+		return ErrNoDisplay
+	}
 
 	display := fmt.Sprintf(":%d", x.Display)
 
-	_, err := os.Stat(fmt.Sprintf("/tmp/.X11-unix/X%d", x.Display))
-	if !os.IsNotExist(err) {
+	if isDisplayInUse(x.Display) {
 		return ErrDisplayInUse(x.Display)
 	}
 
-	// TODO capture process output and return it with an error
 	x.cmd = exec.Command(
 		"Xephyr",
 		append([]string{
-			display,
+			fmt.Sprintf(":%d", x.Display),
 			"-screen",
 			fmt.Sprintf("%dx%d", x.Width, x.Height),
 		}, x.Args...)...,
 	)
 
-	if x.SetEnv {
-		if err := os.Setenv("DISPLAY", display); err != nil {
-			return err
-		}
-	}
+	x.cmd.Env = append(os.Environ(), fmt.Sprintf("DISPLAY=:%d", x.HostDisplay))
 
 	// start and return if any error rises
 	if err := x.cmd.Start(); err != nil {
@@ -87,81 +87,21 @@ func (x *Xephyr) Start() error {
 		return ErrCrashed
 	}
 
+	if err := os.Setenv("DISPLAY", display); err != nil {
+		return err
+	}
+
 	return nil
-}
-
-// Stop stops Xephyr gracefully
-func (x Xephyr) Stop() error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	return x.cmd.Process.Signal(syscall.SIGTERM)
-}
-
-// Kill stops Xephyr forcefully
-func (x Xephyr) Kill() error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	return x.cmd.Process.Kill()
-}
-
-// Wait waits for Xephyr to quit
-func (x Xephyr) Wait() error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	return x.cmd.Wait()
-}
-
-// IsRunning checks if Xephyr process is running
-func (x Xephyr) IsRunning() bool {
-	if x.cmd == nil || x.cmd.Process == nil {
-		return false
-	}
-
-	return x.cmd.Process.Signal(syscall.Signal(0)) == nil
-}
-
-// IsReady checks if Xephyr is ready to display windows
-func (x Xephyr) IsReady() (bool, error) {
-	return isDisplayReady(x.Display)
-}
-
-// WaitUntilReady waits until the Xephyr is ready or timeout has been exceeded
-func (x Xephyr) WaitUntilReady(timeout int) error {
-	if !x.IsRunning() {
-		return ErrNotRunning
-	}
-
-	i := 0
-	for timeout == 0 || i < timeout {
-		ready, err := x.IsReady()
-
-		if err != nil {
-			return err
-		}
-
-		if ready {
-			return nil
-		}
-
-		time.Sleep(1 * time.Second)
-
-		if timeout != 0 {
-			i++
-		}
-	}
-
-	return ErrTimeout(timeout)
 }
 
 // IsVisible is the backend visible
 func (Xephyr) IsVisible() bool {
 	return true
+}
+
+// GetBackend returns name of the backend
+func (Xephyr) GetBackend() string {
+	return "xephyr"
 }
 
 // GetDependencies returns dependencies that should be in path for it to run
