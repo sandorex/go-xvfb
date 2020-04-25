@@ -7,7 +7,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@master
-    - name: run
+    - run: |
+        apt-get upgrade -qqy
+        apt-get install xvfb xserver-xephyr x11-utils
+    - name: Go Test
       uses: cedrickring/golang-action@1.5.2
       env:
         GO111MODULE: "on"
